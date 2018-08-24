@@ -99,12 +99,13 @@ public class MainActivity extends AppCompatActivity implements SipEventsNotifiab
 
     @Override
     public void updateCallState(Call.State callState, Call call, ContentValues values) {
-        if(call != null && callState != null) //this notif could come in before the listener connects to SIP server
+        if (call != null && callState != null) //this notif could come in before the listener connects to SIP server
         {
             this.call = call;
             Button btn = ((Button) findViewById(R.id.call_btn));
             switch (callState) {
                 case End:
+                case Error:
                     this.stopChronometry();
                     btn.setText("Call");
                     btn.setBackgroundColor(Color.parseColor("#ff669900"));
@@ -157,7 +158,7 @@ public class MainActivity extends AppCompatActivity implements SipEventsNotifiab
                         }
                     });
                     if (values != null && values.containsKey("otherParty")) {
-                        Toast.makeText(this, "Calling " + values.getAsString("otherParty"), Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, "Dialling out... " , Toast.LENGTH_LONG).show();
                     }
                     break;
 
@@ -171,7 +172,7 @@ public class MainActivity extends AppCompatActivity implements SipEventsNotifiab
 
     @Override
     public void updateRegistrationState(RegistrationState registrationState, ContentValues values) {
-        if(registrationState != null) { //could be sent before listener has any notifs, e.g when this service connects to service before registration
+        if (registrationState != null) { //could be sent before listener has any notifs, e.g when this service connects to service before registration
             Switch sw = ((Switch) findViewById(R.id.register_sw));
             TextView acc = ((TextView) findViewById(R.id.account_tv));
             switch (registrationState) {
@@ -186,11 +187,11 @@ public class MainActivity extends AppCompatActivity implements SipEventsNotifiab
 
 
                     acc.setVisibility(View.VISIBLE);
-                    //if(values != null && values.containsKey("username")) //Requested notifications will not come with values
-                    //{
-                    acc.setText(values.getAsString("username") + "@" + values.getAsString("domain"));
-                    Toast.makeText(this, "Registered " + values.getAsString("username") + "@" + values.getAsString("domain"), Toast.LENGTH_LONG).show();
-                    //}
+                    if (values != null && values.containsKey("username")) //Requested notifications will not come with values
+                    {
+                        acc.setText(values.getAsString("username") + "@" + values.getAsString("domain"));
+                        Toast.makeText(this, "Registered " + values.getAsString("username") + "@" + values.getAsString("domain"), Toast.LENGTH_LONG).show();
+                    }
                     break;
                 case None:
                 case Cleared:
@@ -235,7 +236,7 @@ public class MainActivity extends AppCompatActivity implements SipEventsNotifiab
             SIPHandler.BindingAgent bindingAgent = (SIPHandler.BindingAgent) service;
             MainActivity.this.handler = (SIPHandler) bindingAgent.getService();
             MainActivity.this.handler.setNotifiable(MainActivity.this);
-     }
+        }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {

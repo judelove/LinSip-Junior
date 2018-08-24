@@ -19,6 +19,7 @@ import org.linphone.core.Core;
 import org.linphone.core.Factory;
 import org.linphone.core.NatPolicy;
 import org.linphone.core.ProxyConfig;
+import org.linphone.core.RegistrationState;
 
 /**
  * Created by Jude Mukundane on 06/03/2018.
@@ -92,7 +93,6 @@ public class SIPHandler extends Service {
 
 
     private void prepareProxy() {
-        this.loadConfig();
         this.proxyConfig = linphoneCore.createProxyConfig();
         this.proxyConfig.setNatPolicy(this.createNatPolicy()); //use STUN. There is every chance you are on a NATted network
 
@@ -183,6 +183,13 @@ public class SIPHandler extends Service {
 
     void register() {
         try {
+            this.loadConfig();
+            if(this.username.isEmpty() || this.password.isEmpty() || this.domain.isEmpty())
+            {
+                this.showToast("Can't register! Username, password or domain is missing!");
+                this.parent.updateRegistrationState(RegistrationState.None, null);
+                return;
+            }
             this.prepareSipProfile();
             this.linphoneCore = Factory.instance().createCoreWithConfig(this.profile, this);
             this.linphoneCore.addListener(this.coreListener);
@@ -231,7 +238,7 @@ public class SIPHandler extends Service {
             this.linphoneCore.getDefaultProxyConfig().enableRegister(false);
             this.linphoneCore.getDefaultProxyConfig().done();
             //this.isRunning = false;
-            //this.linphoneCore.clearProxyConfig(); //only thing similar to deregistration
+            this.linphoneCore.clearProxyConfig(); //only thing similar to deregistration
 
         } catch (Exception e) {
             e.printStackTrace();
