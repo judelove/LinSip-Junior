@@ -9,6 +9,7 @@ import android.content.SharedPreferences;
 import android.os.Binder;
 import android.os.IBinder;
 import android.support.v4.app.NotificationCompat;
+import android.util.Log;
 import android.widget.Toast;
 
 import org.linphone.core.Address;
@@ -20,6 +21,15 @@ import org.linphone.core.Factory;
 import org.linphone.core.NatPolicy;
 import org.linphone.core.ProxyConfig;
 import org.linphone.core.RegistrationState;
+import org.linphone.core.Transports;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 
 /**
  * Created by Jude Mukundane on 06/03/2018.
@@ -35,7 +45,7 @@ public class SIPHandler extends Service {
     private String username, password, domain;
     private SipEventsNotifiable parent;
     private SharedPreferences prefs;
-    private boolean isRunning;
+    private boolean isRunning, sipRunning;
     private String stun;
 
     @Override
@@ -46,8 +56,10 @@ public class SIPHandler extends Service {
 
     @Override
     public void onCreate() {
+        super.onCreate();
         this.coreListener = new SipListener();
         this.prefs = this.getSharedPreferences("org.rootio.linsipjunior", Context.MODE_PRIVATE);
+        this.initializeStack();
     }
 
     @Override
@@ -56,7 +68,6 @@ public class SIPHandler extends Service {
         return Service.START_STICKY;
 
     }
-
 
 
     @Override
@@ -71,7 +82,7 @@ public class SIPHandler extends Service {
     {
         this.parent = parent;
         this.coreListener.setNotifiable(this.parent);
-     }
+    }
 
 
     private void loadConfig() {
@@ -83,125 +94,102 @@ public class SIPHandler extends Service {
         }
     }
 
-    private NatPolicy createNatPolicy()
-    {
+    private NatPolicy createNatPolicy() {
         NatPolicy natPolicy = linphoneCore.createNatPolicy();
-        natPolicy.enableStun(true);
         natPolicy.setStunServer(this.stun);
+
+        //natPolicy.enableTurn(true);
+        natPolicy.enableIce(true);
+        natPolicy.enableStun(true);
+
+        natPolicy.resolveStunServer();
         return natPolicy;
     }
 
 
     private void prepareProxy() {
         this.proxyConfig = linphoneCore.createProxyConfig();
-        this.proxyConfig.setNatPolicy(this.createNatPolicy()); //use STUN. There is every chance you are on a NATted network
+        Transports trns = Factory.instance().createTransports();
+        trns.setUdpPort(-1);
+        trns.setTcpPort(-1);
+        this.linphoneCore.setTransports(trns);
 
         //The address of the peer
         Address addr = Factory.instance().createAddress(String.format("sip:%s@%s", this.username, this.domain));
+        Address proxy = Factory.instance().createAddress("sip:" + this.domain);
         this.authInfo = Factory.instance().createAuthInfo(addr.getUsername(), null, this.password, null, null, null);
         this.linphoneCore.addAuthInfo(authInfo);
+
+
         this.proxyConfig.setIdentityAddress(addr);
-        this.proxyConfig.setServerAddr(addr.getDomain());
+        this.proxyConfig.setServerAddr(proxy.getDomain());
+
+        this.proxyConfig.setNatPolicy(this.createNatPolicy()); //use STUN. There is every chance you are on a NATted network
 
         //Registration deets
         this.proxyConfig.setExpires(2000);
-        this.proxyConfig.enableRegister(true);
+        this.proxyConfig.enableRegister(false);
 
-        //add the proxy config, default if only one
         this.linphoneCore.addProxyConfig(this.proxyConfig);
         this.linphoneCore.setDefaultProxyConfig(this.proxyConfig);
-
     }
 
     private void prepareSipProfile() {
-        String conf = "#\n" +
-                "#This file shall not contain path referencing package name, in order to be portable when app is renamed.\n" +
-                "#Paths to resources must be set from LinphoneManager, after creating LinphoneCore.\n" +
-                "[net]\n" +
-                "mtu=1300\n" +
-                "#Because dynamic bitrate adaption can increase bitrate, we must allow \"no limit\"\n" +
-                "download_bw=0\n" +
-                "upload_bw=0\n" +
-                "force_ice_disablement=0\n" +
-                "\n" +
-                "[sip]\n" +
-                "guess_hostname=1\n" +
-                "register_only_when_network_is_up=1\n" +
-                "auto_net_state_mon=0\n" +
-                "auto_answer_replacing_calls=1\n" +
-                "ping_with_options=0\n" +
-                "rls_uri=\n" +
-                "use_cpim=1\n" +
-                "linphone_specs=groupchat\n" +
-                "\n" +
-                "[rtp]\n" +
-                "audio_rtp_port=7076\n" +
-                "video_rtp_port=9078\n" +
-                "audio_jitt_comp=60\n" +
-                "video_jitt_comp=60\n" +
-                "nortp_timeout=30\n" +
-                "disable_upnp=1\n" +
-                "\n" +
-                "[sound]\n" +
-                "playback_dev_id=\n" +
-                "ringer_dev_id=\n" +
-                "capture_dev_id=\n" +
-                "dtmf_player_amp=0.1\n" +
-                "\n" +
-                "#remove this property for any application that is not Linphone public version itself\n" +
-                "ec_calibrator_cool_tones=1\n" +
-                "\n" +
-                "[misc]\n" +
-                "max_calls=10\n" +
-                "history_max_size=100\n" +
-                "enable_basic_to_client_group_chat_room_migration=0\n" +
-                "enable_simple_group_chat_message_state=0\n" +
-                "aggregate_imdn=1\n" +
-                "version_check_url_root=https://www.linphone.org/releases\n" +
-                "\n" +
-                "[app]\n" +
-                "activation_code_length=4\n" +
-                "prefer_basic_chat_room=1\n" +
-                "\n" +
-                "[in-app-purchase]\n" +
-                "server_url=https://subscribe.linphone.org:444/inapp.php\n" +
-                "purchasable_items_ids=test_account_subscription\n" +
-                "\n" +
-                "[assistant]\n" +
-                "domain=sip.linphone.org\n" +
-                "password_max_length=-1\n" +
-                "password_min_length=1\n" +
-                "username_length=-1\n" +
-                "username_max_length=64\n" +
-                "username_min_length=1\n" +
-                "username_regex=^[a-z0-9_.\\-]*$\n" +
-                "xmlrpc_url=https://subscribe.linphone.org:444/wizard.php";
-
-        this.profile = Factory.instance().createConfigFromString(""); //conf); Config string above was tripping the client, would not connect..
+        this.profile = Factory.instance().createConfigFromString(""); //Config string above was tripping the client, would not connect..
 
     }
 
     void register() {
+        this.linphoneCore.removeListener(coreListener);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                //This is a strange flow, but for STUN/TURN to kick in, you need to register first, then unregister and register again!
+                //The registration triggers a stun update but it can only be used on next registration. That's what it looks like for now
+                //so, register for 1 sec, then re-register
+
+                sipRegister();
+                try {
+                    linphoneCore.addListener(coreListener);
+                    Thread.sleep(1000);//too little and linphoneCore may not process our events due to backlog/network delay, too high and we sleep too long..
+                    deregister();
+                    Thread.sleep(1000);//too little and linphoneCore may not process our events due to backlog/network delay, too high and we sleep too long..
+                    sipRegister();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+        }).start();
+    }
+
+    private void sipRegister() {
+
+        linphoneCore.getDefaultProxyConfig().edit();
+        linphoneCore.getDefaultProxyConfig().enableRegister(true);
+        linphoneCore.getDefaultProxyConfig().done();
+    }
+
+    void initializeStack() {
         try {
             this.loadConfig();
-            if(this.username.isEmpty() || this.password.isEmpty() || this.domain.isEmpty())
-            {
+
+            if (this.username.isEmpty() || this.password.isEmpty() || this.domain.isEmpty()) {
                 this.showToast("Can't register! Username, password or domain is missing!");
                 this.parent.updateRegistrationState(RegistrationState.None, null);
                 return;
             }
-            this.prepareSipProfile();
-            this.linphoneCore = Factory.instance().createCoreWithConfig(this.profile, this);
-            this.linphoneCore.addListener(this.coreListener);
-            this.prepareProxy();
-            this.isRunning = true;
 
-            //listen for SIP events on new thread
+            this.prepareSipProfile();
+            this.linphoneCore = Factory.instance().createCoreWithConfig(profile, this);
+            this.prepareProxy();
+
+            linphoneCore.start();
+            isRunning = true;
+
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    linphoneCore.start();
-                    while (isRunning) {
+                   while (isRunning) {
                         try {
                             Thread.sleep(50);
                         } catch (InterruptedException e) {
@@ -212,25 +200,18 @@ public class SIPHandler extends Service {
                 }
             }).start();
 
-
         } catch (Exception e) {
             e.printStackTrace();
-            //Ideally if this happens, then reg fails, the status should still be DEREGISTERED
-            ContentValues values = new ContentValues();
-            values.put("errorCode", 0);
-            values.put("errorMessage", "SIP Error occurred. Please check config and network availability");
-            //this.notifyRegistrationEvent(this.registrationState, values);
+
         }
     }
 
     public void deregister() {
         try {
-            if(linphoneCore.inCall()) {
+            if (linphoneCore.inCall()) {
                 try { //state might change between check and termination call..
                     this.linphoneCore.getCurrentCall().terminate();
-                }
-                catch(Exception ex)
-                {
+                } catch (Exception ex) {
                     ex.printStackTrace();
                 }
             }
@@ -238,7 +219,7 @@ public class SIPHandler extends Service {
             this.linphoneCore.getDefaultProxyConfig().enableRegister(false);
             this.linphoneCore.getDefaultProxyConfig().done();
             //this.isRunning = false;
-            this.linphoneCore.clearProxyConfig(); //only thing similar to deregistration
+            //this.linphoneCore.clearProxyConfig(); //only thing similar to deregistration
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -249,7 +230,7 @@ public class SIPHandler extends Service {
     public void call(String phoneNumber) {
         try {
             Call call = linphoneCore.invite(phoneNumber);
-            } catch (Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
             this.showToast("A SIP error occurred. Check config details or Internet connection");
         }
@@ -273,7 +254,7 @@ public class SIPHandler extends Service {
         }
     }
 
-   private void showToast(final String message) {
+    private void showToast(final String message) {
         ((Activity) SIPHandler.this.parent).runOnUiThread(new Runnable() {
             @Override
             public void run() {
